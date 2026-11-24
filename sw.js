@@ -1,4 +1,4 @@
-const CACHE = 'orders-v1';
+const CACHE = 'orders-v2';
 const FILES = ['./', './index.html', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {
