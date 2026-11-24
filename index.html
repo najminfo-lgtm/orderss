@@ -39,7 +39,6 @@ button.secondary{background:var(--muted)}
 button.success{background:var(--success)}
 button.danger{background:var(--danger)}
 button.info{background:var(--info);color:#000}
-button.whatsapp{background:#25D366}
 button.small{padding:5px 9px;font-size:12px;border-radius:6px}
 button.full{width:100%;padding:12px;font-size:15px}
 .row{display:flex;gap:8px}.row>*{flex:1}
@@ -59,7 +58,6 @@ button.full{width:100%;padding:12px;font-size:15px}
 .badge.pending{background:#6c757d}.badge.preparing{background:var(--warning);color:#000}
 .badge.delivered{background:var(--success)}.badge.cancelled{background:var(--danger)}
 .badge.receipt{background:var(--success)}.badge.payment{background:var(--warning);color:#000}
-.badge.due{background:var(--danger)}
 .filter-bar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
 .filter-bar input,.filter-bar select{flex:1;margin:0;min-width:100px;font-size:13px}
 .empty{text-align:center;padding:40px 20px;color:var(--muted);font-size:13px}
@@ -117,11 +115,17 @@ tbody tr:hover{background:var(--bg)}
 .template-item .info{flex:1;min-width:0}
 .template-item .info .title{font-weight:700;font-size:13px}
 .template-item .info .sub{font-size:11px;color:var(--muted)}
-@media print{
-  header,nav,#installBanner,.followup-actions,button{display:none !important}
-  body{background:#fff;color:#000}
-  .modal{position:static;background:none;padding:0;display:block}
-  .modal-content{max-width:none;box-shadow:none;padding:0}
+
+/* اصلاح کامل باگ چاپ فاکتور */
+@media print {
+  body * { visibility: hidden; background: transparent !important; color: #000 !important; box-shadow: none !important; }
+  #invoiceModal, #invoiceModal * { visibility: visible; }
+  #invoiceModal { position: absolute; left: 0; top: 0; width: 100%; display: block !important; background: #fff !important; }
+  #invoiceModal .modal-content { max-width: 100% !important; max-height: none !important; overflow: visible !important; padding: 0 !important; border: none !important; }
+  .no-print, .no-print * { display: none !important; visibility: hidden !important; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #000 !important; padding: 8px; }
+  th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 </style>
 </head>
@@ -226,7 +230,7 @@ tbody tr:hover{background:var(--bg)}
   <section id="tab-followup" class="tab">
     <div class="card">
       <h2 style="margin:0 0 12px;font-size:16px;color:var(--primary);font-weight:700">🔔 پیگیری مشتریان بدهکار</h2>
-      <p style="font-size:12px;color:var(--muted);margin:0 0 8px">با تماس/پیامک/واتساپ پیگیری کنید و زمان یادآوری بعدی را تعیین کنید.</p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px">با تماس یا ارسال پیام در اپ‌های مختلف (ایتا، روبیکا و...) پیگیری کنید.</p>
       <div class="filter-bar" style="margin:0">
         <input type="text" id="followupSearch" placeholder="🔍 جستجوی مشتری">
         <select id="followupSort">
@@ -389,15 +393,33 @@ function faDate(j){if(!j)return '—';return toFaDigits(j);}
 function $(s,c=document){return c.querySelector(s);}
 function $$(s,c=document){return [...c.querySelectorAll(s)];}
 function formatMoney(n){if(n==null||isNaN(n))return '۰';return toFaDigits(Math.round(n).toLocaleString('en-US'));}
-function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._tm);t._tm=setTimeout(()=>t.classList.remove('show'),2200);}
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._tm);t._tm=setTimeout(()=>t.classList.remove('show'),2500);}
 function downloadBlob(blob,filename){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},500);}
 function statusLabel(s){return {pending:'در انتظار',preparing:'در حال آماده‌سازی',delivered:'تحویل شده',cancelled:'لغو شده'}[s]||s;}
 function trxLabel(t){return t==='receipt'?'دریافت':'پرداخت';}
 function normalizePhone(p){if(!p)return'';return toEnDigits(p).replace(/[^0-9+]/g,'');}
 
+/* ============ Share (جایگزین واتساپ) ============ */
+async function shareText(text) {
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'مدیریت سفارشات', text: text });
+    } catch (err) {
+      console.log('Share cancelled or failed', err);
+    }
+  } else {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('متن کپی شد. می‌توانید در ایتا، روبیکا یا پیامک پیست کنید.');
+    } catch (err) {
+      toast('امکان کپی یا اشتراک‌گذاری وجود ندارد.');
+    }
+  }
+}
+
 const Storage = {
   get(k,def){try{const v=localStorage.getItem('app_'+k);return v?JSON.parse(v):def;}catch{return def;}},
-  set(k,v){localStorage.setItem('app_'+k,JSON.stringify(v));}
+  set(k,v){try{localStorage.setItem('app_'+k,JSON.stringify(v));}catch(e){toast('خطا در ذخیره‌سازی! حافظه پر است.');}}
 };
 
 function applyTheme(t){
@@ -437,20 +459,31 @@ document.querySelectorAll('nav button').forEach(b=>{
   });
 });
 
+/* ============ Contact Picker (با مدیریت خطای حرفه‌ای) ============ */
 async function pickContact(){
-  if('contacts' in navigator && 'ContactsManager' in window){
-    try{
-      const contacts = await navigator.contacts.select(['name','tel'],{multiple:false});
-      if(contacts.length>0){const c=contacts[0];return {name:(c.name&&c.name[0])||'',tel:(c.tel&&c.tel[0])||''};}
-    }catch(e){if(e.name!=='AbortError')toast('خطا در دسترسی');}
-  }else{toast('مرورگر پشتیبانی نمی‌کند. دستی وارد کنید.');}
+  if(!('contacts' in navigator && 'ContactsManager' in window)){
+    toast('مرورگر شما از خواندن مخاطبین پشتیبانی نمی‌کند. لطفاً شماره را دستی وارد کنید.');
+    return null;
+  }
+  try{
+    const props = ['name', 'tel'];
+    const opts = {multiple: false};
+    const contacts = await navigator.contacts.select(props, opts);
+    if(contacts.length > 0){
+      const c = contacts[0];
+      return { name: (c.name && c.name[0]) || '', tel: (c.tel && c.tel[0]) || '' };
+    }
+  }catch(e){
+    if(e.name !== 'AbortError') toast('دسترسی به مخاطبین داده نشد یا خطایی رخ داد.');
+  }
   return null;
 }
 $('#pickContactBtn').addEventListener('click',async()=>{
   const c=await pickContact();
-  if(c){$('#customerName').value=c.name||'';$('#customerPhone').value=c.tel||'';toast('انتخاب شد');}
+  if(c){$('#customerName').value=c.name||'';$('#customerPhone').value=c.tel||'';toast('مخاطب انتخاب شد');}
 });
 
+/* ============ Calendar ============ */
 let calView={year:0,month:0}, calCallback=null;
 function openCalendar(initialValue, callback){
   const today = todayJalali();
@@ -495,6 +528,7 @@ function setDateField(f,o){$('#'+f).value=addDaysToJalali(fmtJ(todayJalali()),o)
 function setReportRange(d){$('#reportFrom').value=addDaysToJalali(fmtJ(todayJalali()),-d+1);$('#reportTo').value=fmtJ(todayJalali());renderReports();}
 function clearReportRange(){$('#reportFrom').value='';$('#reportTo').value='';renderReports();}
 
+/* ============ Order Form ============ */
 function renderFormItems(){
   const cont=$('#itemsContainer');cont.innerHTML='';
   if(state.formItems.length===0)state.formItems.push({name:'',quantity:1,unit:'عدد',unitPrice:0});
@@ -599,6 +633,7 @@ function resetOrderForm(){
 }
 $('#cancelEditBtn').addEventListener('click',resetOrderForm);
 
+/* ============ Templates ============ */
 $('#saveTemplateBtn').addEventListener('click',()=>{
   const validItems=state.formItems.filter(i=>i.name.trim()&&i.quantity>0);
   if(validItems.length===0){toast('ابتدا اقلام را وارد کنید');return;}
@@ -632,6 +667,7 @@ window.useTemplate = id=>{
 };
 window.deleteTemplate = id=>{if(!confirm('حذف قالب؟'))return;state.templates=state.templates.filter(x=>x.id!==id);persist();$('#templateModal').classList.remove('show');$('#loadTemplateBtn').click();};
 
+/* ============ Products ============ */
 $('#saveProductBtn').addEventListener('click',()=>{
   const name=$('#productName').value.trim();
   const unit=$('#productUnit').value.trim()||'عدد';
@@ -658,6 +694,7 @@ function renderProducts(){
 window.editProduct=id=>{const p=state.products.find(x=>x.id===id);if(!p)return;$('#productName').value=p.name;$('#productUnit').value=p.unit;$('#productPrice').value=p.price;state.products=state.products.filter(x=>x.id!==id);persist();renderProducts();};
 window.deleteProduct=id=>{if(!confirm('حذف؟'))return;state.products=state.products.filter(x=>x.id!==id);persist();renderProducts();};
 
+/* ============ Orders List ============ */
 function renderOrders(){
   const q=$('#searchBox').value.trim().toLowerCase(),st=$('#statusFilter').value;
   let f=[...state.orders].sort((a,b)=>b.createdAt-a.createdAt);
@@ -677,6 +714,7 @@ function renderOrders(){
 $('#searchBox').addEventListener('input',renderOrders);
 $('#statusFilter').addEventListener('change',renderOrders);
 
+/* ============ Order Detail ============ */
 window.showOrder=id=>{
   const o=state.orders.find(x=>x.id===id);if(!o)return;
   const itemsHtml=o.items.map(i=>`<div class="detail-row"><span>${i.name} (${toFaDigits(i.quantity)} ${i.unit} × ${formatMoney(i.unitPrice)})</span><span>${formatMoney(i.quantity*i.unitPrice)}</span></div>`).join('');
@@ -684,7 +722,8 @@ window.showOrder=id=>{
   const relTrx=state.transactions.filter(t=>t.relatedOrder===o.orderNumber);
   const relTrxHtml=relTrx.length?`<div style="background:var(--bg);padding:8px;border-radius:6px;margin-top:8px"><div style="font-weight:700;color:var(--primary);font-size:12px;margin-bottom:4px">تراکنش‌های مرتبط:</div>${relTrx.map(t=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${trxLabel(t.type)} - ${faDate(t.date)}</span><span style="color:${t.type==='receipt'?'var(--success)':'var(--warning)'}">${formatMoney(t.amount)}</span></div>`).join('')}</div>`:'';
   const phone=normalizePhone(o.customerPhone);
-  const msgText = encodeURIComponent(`سلام ${o.customerName} عزیز، سفارش ${o.orderNumber} شما با مبلغ مانده ${formatMoney(o.remaining)} ریال در انتظار تسویه است. با تشکر`);
+  const msgText = `سلام ${o.customerName} عزیز، سفارش ${o.orderNumber} شما با مبلغ مانده ${formatMoney(o.remaining)} ریال در انتظار تسویه است. با تشکر`;
+  
   $('#orderModalContent').innerHTML=`
     <h3>سفارش ${toFaDigits(o.orderNumber)}</h3>
     <div class="detail-row"><span>مشتری</span><span><b>${o.customerName}</b></span></div>
@@ -706,8 +745,7 @@ window.showOrder=id=>{
       ${o.status!=='delivered'?`<button class="success small" onclick="markDelivered(${o.id})">✅ تحویل شد</button>`:''}
       <button class="small info" onclick="showInvoice(${o.id})">🧾 فاکتور</button>
       ${phone?`<a href="tel:${phone}" style="text-decoration:none"><button class="small success">📞 تماس</button></a>`:''}
-      ${phone?`<a href="sms:${phone}?body=${msgText}" style="text-decoration:none"><button class="small info">💬 پیامک</button></a>`:''}
-      ${phone?`<a href="https://wa.me/${phone.replace(/^0/,'98')}?text=${msgText}" target="_blank" style="text-decoration:none"><button class="small whatsapp">واتساپ</button></a>`:''}
+      ${phone?`<button class="small secondary" onclick="shareText('${msgText.replace(/'/g, "\\'")}')">📤 ارسال پیام</button>`:''}
       <button class="small" onclick="editOrder(${o.id})">✏️</button>
       <button class="small danger" onclick="deleteOrder(${o.id})">🗑</button>
       <button class="small secondary" onclick="closeModal()">بستن</button>
@@ -718,10 +756,14 @@ window.closeModal=()=>{['orderModal','invoiceModal'].forEach(id=>$('#'+id).class
 $('#orderModal').addEventListener('click',e=>{if(e.target.id==='orderModal')closeModal();});
 $('#invoiceModal').addEventListener('click',e=>{if(e.target.id==='invoiceModal')closeModal();});
 
+/* ============ Invoice ============ */
 window.showInvoice=id=>{
   const o=state.orders.find(x=>x.id===id);if(!o)return;
   const phone=normalizePhone(o.customerPhone);
   const itemsRows=o.items.map((i,idx)=>`<tr><td>${toFaDigits(idx+1)}</td><td>${i.name}</td><td>${toFaDigits(i.quantity)} ${i.unit}</td><td>${formatMoney(i.unitPrice)}</td><td>${formatMoney(i.quantity*i.unitPrice)}</td></tr>`).join('');
+  
+  const invoiceMsg = `فاکتور سفارش ${o.orderNumber}\nمشتری: ${o.customerName}\nمبلغ: ${formatMoney(o.payableAmount)} ریال\nمانده: ${formatMoney(o.remaining)} ریال`;
+  
   $('#invoiceModalContent').innerHTML=`
     <div style="text-align:center;border-bottom:2px solid var(--primary);padding-bottom:10px;margin-bottom:12px">
       <h2 style="margin:0;color:var(--primary)">فاکتور فروش</h2>
@@ -744,10 +786,10 @@ window.showInvoice=id=>{
       <div class="detail-row" style="border:none;padding:4px 0"><span>مانده:</span><b style="color:var(--danger)">${formatMoney(o.remaining)} ریال</b></div>
     </div>
     ${o.description?`<div style="margin-top:12px;font-size:12px;color:var(--muted)"><b>توضیحات:</b> ${o.description}</div>`:''}
-    <div style="display:flex;gap:6px;margin-top:16px;flex-wrap:wrap">
+    
+    <div class="no-print" style="display:flex;gap:6px;margin-top:16px;flex-wrap:wrap">
       <button class="success" onclick="window.print()" style="flex:1">🖨 چاپ / PDF</button>
-      ${phone?`<a href="https://wa.me/${phone.replace(/^0/,'98')}?text=${encodeURIComponent('فاکتور سفارش '+o.orderNumber+'\nمشتری: '+o.customerName+'\nمبلغ: '+formatMoney(o.payableAmount)+' ریال\nمانده: '+formatMoney(o.remaining)+' ریال')}" target="_blank" style="flex:1;text-decoration:none"><button class="whatsapp" style="width:100%">واتساپ</button></a>`:''}
-      ${phone?`<a href="sms:${phone}?body=${encodeURIComponent('فاکتور '+o.orderNumber+'\nمبلغ: '+formatMoney(o.payableAmount)+' ریال\nمانده: '+formatMoney(o.remaining)+' ریال')}" style="flex:1;text-decoration:none"><button class="info" style="width:100%">پیامک</button></a>`:''}
+      ${phone?`<button class="secondary" onclick="shareText('${invoiceMsg.replace(/'/g, "\\'")}')" style="flex:1">📤 ارسال فاکتور</button>`:''}
       <button class="secondary" onclick="closeModal()" style="flex:1">بستن</button>
     </div>`;
   $('#invoiceModal').classList.add('show');
@@ -755,7 +797,7 @@ window.showInvoice=id=>{
 
 window.markDelivered=id=>{
   const o=state.orders.find(x=>x.id===id);if(!o)return;
-  openCalendar(fmtJ(todayJalali()),v=>{o.status='delivered';o.deliveredDate=v;persist();toast('تحویل شد');closeModal();renderOrders();updateFollowupBadge();});
+  openCalendar(fmtJ(todayJalali()),v=>{if(v){o.status='delivered';o.deliveredDate=v;persist();toast('تحویل شد');closeModal();renderOrders();updateFollowupBadge();}});
 };
 window.editOrder=id=>{
   const o=state.orders.find(x=>x.id===id);if(!o)return;
@@ -777,6 +819,7 @@ window.deleteOrder=id=>{
   persist();toast('حذف شد');closeModal();renderOrders();checkDeliveryAlerts();updateFollowupBadge();
 };
 
+/* ============ Finance ============ */
 function renderFinance(){
   const r=state.transactions.filter(t=>t.type==='receipt').reduce((s,t)=>s+t.amount,0);
   const p=state.transactions.filter(t=>t.type==='payment').reduce((s,t)=>s+t.amount,0);
@@ -824,6 +867,7 @@ window.deleteTrx=id=>{
   persist();toast('حذف شد');renderFinance();updateFollowupBadge();
 };
 
+/* ============ Followups ============ */
 function getCustomerBalances(){
   const map={};
   state.orders.forEach(o=>{
@@ -868,7 +912,7 @@ function renderFollowups(){
   if(list.length===0){container.innerHTML='<div class="empty">🎉 مشتری بدهکاری ندارید!</div>';return;}
   container.innerHTML=list.map(c=>{
     const phone=normalizePhone(c.phone);
-    const msg=encodeURIComponent(`سلام ${c.name} عزیز،\nمبلغ مانده حساب شما ${formatMoney(c.balance)} ریال است.\nلطفاً نسبت به تسویه اقدام فرمایید.\nبا تشکر`);
+    const msg=`سلام ${c.name} عزیز،\nمبلغ مانده حساب شما ${formatMoney(c.balance)} ریال است.\nلطفاً نسبت به تسویه اقدام فرمایید.\nبا تشکر`;
     const cls=c.isDue?'due':(c.soon?'soon':'');
     const statusTxt=c.isDue?'🔴 سررسید شده':(c.nextDate?`📅 یادآوری: ${faDate(c.nextDate)}`:'⚪ بدون زمان‌بندی');
     return `<div class="followup-card ${cls}">
@@ -879,8 +923,7 @@ function renderFollowups(){
       <div class="fu-info">${c.phone?`📞 ${toFaDigits(c.phone)} • `:''}${statusTxt}${c.lastContact?' • آخرین تماس: '+faDate(c.lastContact):''}</div>
       <div class="followup-actions">
         ${phone?`<a href="tel:${phone}" style="text-decoration:none"><button class="success">📞 تماس</button></a>`:''}
-        ${phone?`<a href="sms:${phone}?body=${msg}" style="text-decoration:none"><button class="info">💬 پیامک</button></a>`:''}
-        ${phone?`<a href="https://wa.me/${phone.replace(/^0/,'98')}?text=${msg}" target="_blank" style="text-decoration:none"><button class="whatsapp">واتساپ</button></a>`:''}
+        ${phone?`<button class="secondary" onclick="shareText('${msg.replace(/'/g, "\\'")}')">📤 ارسال پیام</button>`:''}
       </div>
       <div class="followup-actions" style="margin-top:6px">
         <button class="secondary small" onclick="setFollowupDate('${c.name.replace(/'/g,"\\'")}')">📅 ${c.nextDate?'تغییر زمان':'تعیین زمان'}</button>
@@ -896,6 +939,7 @@ $('#followupSort').addEventListener('change',renderFollowups);
 window.setFollowupDate=name=>{
   const cur=state.followups[name]?.nextDate||fmtJ(todayJalali());
   openCalendar(cur,v=>{
+    if(!v)return;
     if(!state.followups[name])state.followups[name]={};
     state.followups[name].nextDate=v;
     persist();toast('یادآوری برای '+faDate(v)+' تنظیم شد');renderFollowups();
@@ -917,6 +961,7 @@ function updateFollowupBadge(){
   else badge.style.display='none';
 }
 
+/* ============ Reports ============ */
 function getFilteredByDate(){
   const from=normalizeDate($('#reportFrom').value),to=normalizeDate($('#reportTo').value);
   return state.orders.filter(o=>{
@@ -956,6 +1001,7 @@ function renderReports(){
   $('#reportByDate').innerHTML=dateArr.length===0?'<div class="empty">موردی نیست</div>':`<table><thead><tr><th>تاریخ</th><th>تعداد</th><th>جمع</th></tr></thead><tbody>${dateArr.map(d=>`<tr><td>${faDate(d.date)}</td><td>${toFaDigits(d.count)}</td><td>${formatMoney(d.payable)}</td></tr>`).join('')}<tr style="background:rgba(13,110,253,.1);font-weight:700"><td>جمع کل</td><td>${toFaDigits(orders.length)}</td><td>${formatMoney(grandTotal)}</td></tr><tr style="background:rgba(220,53,69,.1);color:var(--danger)"><td colspan="2">مجموع مانده</td><td>${formatMoney(grandRemaining)}</td></tr></tbody></table>`;
 }
 
+/* ============ Excel ============ */
 function exportOrdersToExcel(orders,filename){
   let html=`<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body dir="rtl"><table border="1" dir="rtl" style="font-family:Tahoma"><tr style="background:#0d6efd;color:#fff;font-weight:bold"><th>شماره</th><th>تاریخ ثبت</th><th>مشتری</th><th>تلفن</th><th>اقلام</th><th>جمع کل</th><th>تخفیف</th><th>قابل پرداخت</th><th>پیش‌پرداخت</th><th>مانده</th><th>وضعیت</th><th>موعد</th><th>تحویل</th><th>توضیحات</th></tr>`;
   orders.forEach(o=>{
@@ -969,6 +1015,7 @@ function exportOrdersToExcel(orders,filename){
 $('#exportOrdersExcel').addEventListener('click',()=>{const o=getFilteredByDate();if(o.length===0){toast('سفارشی نیست');return;}exportOrdersToExcel(o,'سفارشات_'+fmtJ(todayJalali()).replace(/\//g,'-'));});
 $('#exportAllExcel').addEventListener('click',()=>{if(state.orders.length===0){toast('سفارشی نیست');return;}exportOrdersToExcel(state.orders,'همه_'+fmtJ(todayJalali()).replace(/\//g,'-'));});
 
+/* ============ Backup ============ */
 function doBackup(){
   const data={version:3,exportedAt:new Date().toISOString(),orders:state.orders,products:state.products,transactions:state.transactions,templates:state.templates,followups:state.followups};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
@@ -983,6 +1030,7 @@ $('#restoreBtn').addEventListener('click',()=>{
   reader.readAsText(f);
 });
 
+/* ============ Notifications ============ */
 function checkDeliveryAlerts(){
   const today=fmtJ(todayJalali());
   const due=state.orders.filter(o=>o.status!=='delivered'&&o.status!=='cancelled'&&o.deliveryDate&&o.deliveryDate<=today);
@@ -1005,6 +1053,7 @@ $('#requestNotifBtn').addEventListener('click',async()=>{
   else toast('اجازه داده نشد');
 });
 
+/* ============ Settings ============ */
 function renderSettings(){
   $('#totalOrdersCount').textContent=toFaDigits(state.orders.length);
   $('#totalTrxCount').textContent=toFaDigits(state.transactions.length);
